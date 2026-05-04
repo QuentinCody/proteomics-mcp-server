@@ -9,11 +9,12 @@ export class ProteomicsDataDO extends RestStagingDO {
         const embedded = (data as { _embedded?: Record<string, unknown[]> })._embedded;
         if (embedded && typeof embedded === "object") {
             const [key, rows] = Object.entries(embedded)[0] ?? [];
+            const keyName = typeof key === "string" ? key.toLowerCase() : "";
             if (rows && Array.isArray(rows) && rows.length > 0) {
-                if (key?.toLowerCase().includes("project")) {
+                if (keyName.includes("project")) {
                     return { tableName: "pride_projects", indexes: ["accession", "submissionType"] };
                 }
-                if (key?.toLowerCase().includes("file")) {
+                if (keyName.includes("file")) {
                     return { tableName: "pride_files", indexes: ["accession", "fileCategory"] };
                 }
                 return { tableName: key || "pride_results" };
