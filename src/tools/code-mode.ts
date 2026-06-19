@@ -23,6 +23,8 @@ export function registerCodeMode(
 
     const executeTool = createExecuteTool({
         prefix: "proteomics",
+        // Verifiable provenance: proteomics_execute results carry a _meta.citation.
+        source: { id: "proteomics", name: "PRIDE (ProteomeXchange)", url: "https://www.ebi.ac.uk/pride", license: "CC BY 4.0" },
         catalog: proteomicsCatalog,
         apiFetch,
         doNamespace: env.PROTEOMICS_DATA_DO,
