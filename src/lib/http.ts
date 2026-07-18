@@ -1,12 +1,17 @@
 /**
  * HTTP clients for the two proteomics archives this server fronts:
- *   PRIDE Archive    → https://www.ebi.ac.uk/pride/ws/archive/v2
+ *   PRIDE Archive    → https://www.ebi.ac.uk/pride/ws/archive/v3
  *   ProteomeXchange  → https://proteomecentral.proteomexchange.org/api/proxi/v0.1
+ *
+ * PRIDE v2 is retired: EBI serves the v3 application at the /v2 path too, so the
+ * old base did not fail loudly — it just answered v3 semantics under a v2 name
+ * (v2's keyword-filtered /projects is v3's /search/projects). Pinned to /v3 so
+ * the base and the catalog describe the same API.
  */
 
 import { restFetch, type RestFetchOptions } from "@bio-mcp/shared/http/rest-fetch";
 
-const PRIDE_BASE = "https://www.ebi.ac.uk/pride/ws/archive/v2";
+const PRIDE_BASE = "https://www.ebi.ac.uk/pride/ws/archive/v3";
 const PROXI_BASE = "https://proteomecentral.proteomexchange.org/api/proxi/v0.1";
 
 export interface ProteomicsFetchOptions extends Omit<RestFetchOptions, "retryOn"> {
