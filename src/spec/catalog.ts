@@ -29,7 +29,7 @@ export const proteomicsCatalog: ApiCatalog = {
     baseUrl: "https://www.ebi.ac.uk",
     version: "1.1",
     auth: "none",
-    endpointCount: 16,
+    endpointCount: 17,
     notes:
         "- Dual API. Always prefix paths: '/pride/...' for PRIDE Archive, '/proxi/...' for ProteomeXchange PROXI.\n" +
         "- PRIDE keyword search MUST go to /pride/search/projects: api.get('/pride/search/projects', {keyword: 'cancer', pageSize: 20})\n" +
