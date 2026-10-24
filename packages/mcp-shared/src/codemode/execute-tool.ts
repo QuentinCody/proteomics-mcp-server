@@ -74,6 +74,10 @@ export interface ExecuteToolOptions {
 	loader: unknown;
 	/** Byte threshold for auto-staging (default 30KB, via DEFAULT_STAGING_THRESHOLD) */
 	stagingThreshold?: number;
+	/** Hard inline byte ceiling for api.get/post, overriding the single-record heuristic. */
+	maxInlineBytes?: number;
+	/** Preserve uncaught API status/data inside the isolate; keeps original caller code for citations. */
+	preserveApiErrors?: boolean;
 	/** Execution timeout in ms (default 30000) */
 	timeout?: number;
 	/** Optional JavaScript source injected into the isolate before user code.
@@ -101,6 +105,7 @@ function wrapUserCode(
 	userCode: string,
 	preamble?: string,
 	includeFsProxy?: boolean,
+	preserveApiErrors?: boolean,
 ): string {
 	const apiProxy = buildApiProxySource();
 	const fsProxy = includeFsProxy ? buildFsProxySource() : "";
@@ -111,7 +116,7 @@ ${apiProxy}
 ${fsProxy}
 ${preamble ? `\n// --- Preamble (domain helpers) ---\n${preamble}\n// --- End preamble ---\n` : ""}
 // --- User code (nested scope so a user const api/schema shadows, not collides — T4.2) ---
-${wrapInUserScope(userCode)}
+${wrapInUserScope(userCode, preserveApiErrors)}
 // --- End user code ---
 }`;
 }
@@ -212,6 +217,7 @@ export function createExecuteTool(
 		doNamespace,
 		stagingPrefix: prefix,
 		stagingThreshold,
+		maxInlineBytes: options.maxInlineBytes,
 		workspaceNamespace,
 	};
 	const apiProxyTool = createApiProxyTool(apiProxyToolOpts);
@@ -379,8 +385,8 @@ export function createExecuteTool(
 				description,
 				schema,
 				async (input: { code: string; workspace?: string }, extra: unknown) => {
-					const code = input.code?.trim();
-					if (!code) {
+					const code = input.code;
+					if (typeof code !== "string" || !code.trim()) {
 						return createCodeModeError(
 							ErrorCodes.INVALID_ARGUMENTS,
 							"code is required",
@@ -393,6 +399,7 @@ export function createExecuteTool(
 							code,
 							preamble,
 							!!fsDoNamespace,
+							options.preserveApiErrors,
 						);
 
 						const scope = getRequestScope(extra as MaybeExtra | undefined);

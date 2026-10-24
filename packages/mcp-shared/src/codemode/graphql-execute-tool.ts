@@ -451,8 +451,8 @@ export function createGraphqlExecuteTool(
 				this.description,
 				this.schema,
 				async (input: { code: string; workspace?: string }, extra: unknown) => {
-					const code = input.code?.trim();
-					if (!code) {
+					const code = input.code;
+					if (typeof code !== "string" || !code.trim()) {
 						return createCodeModeError(
 							ErrorCodes.INVALID_ARGUMENTS,
 							"code is required",

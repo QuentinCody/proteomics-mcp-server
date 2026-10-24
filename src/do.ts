@@ -2,6 +2,15 @@ import { RestStagingDO } from "@bio-mcp/shared/staging/rest-staging-do";
 import type { SchemaHints } from "@bio-mcp/shared/staging/schema-inference";
 
 export class ProteomicsDataDO extends RestStagingDO {
+    protected getTabularData(value: unknown): unknown {
+        const record = (item: unknown): item is Record<string, unknown> => item !== null && typeof item === "object" && !Array.isArray(item);
+        const data = record(value) && Array.isArray(value.content) && record(value.structuredContent) && "data" in value.structuredContent
+            ? value.structuredContent.data : value;
+        if (record(data) && record(data._proteomicsdb) && record(data.native) && record(data.native.d) && Array.isArray(data.native.d.results))
+            return { proteomicsdb_rows: data.native.d.results };
+        return data;
+    }
+
     protected getSchemaHints(data: unknown): SchemaHints | undefined {
         if (!data || typeof data !== "object") return undefined;
 

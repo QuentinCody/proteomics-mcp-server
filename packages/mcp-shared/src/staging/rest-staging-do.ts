@@ -257,6 +257,9 @@ export class RestStagingDO extends DurableObject {
 	}
 
 	/** Override in subclass to provide domain-specific schema hints (Tier 1) */
+	/** Project provider rows without replacing preserved native evidence. */
+	protected getTabularData(data: unknown): unknown { return data; }
+
 	protected getSchemaHints(_data: unknown): SchemaHints | undefined {
 		return undefined;
 	}
@@ -518,7 +521,7 @@ export class RestStagingDO extends DurableObject {
 		// Legacy Tier 1 pipeline — merge server-side hints with client-provided hints
 		const serverHints = this.getSchemaHints(data);
 		const hints = mergeSchemaHints(serverHints, clientHints);
-		const arrays = detectArrays(data);
+		const arrays = detectArrays(this.getTabularData(data));
 
 		if (arrays.length > 0 && arrays.some((a) => a.rows.length > 0)) {
 			try {

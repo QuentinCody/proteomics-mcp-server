@@ -8,9 +8,8 @@
  */
 
 import { z } from "zod";
-import type { ApiCatalog, ApiFetchFn } from "../codemode/catalog";
-import type { ResolvedSpec } from "../codemode/openapi-resolver";
-import { inferUpstreamTotal } from "../completeness";
+import type { ApiProxyToolOptions } from "./api-proxy-options";
+export type { ApiProxyToolOptions } from "./api-proxy-options";
 import type { ToolContext, ToolEntry } from "../registry/types";
 import type { SchemaHints } from "../staging/schema-inference";
 import { effectiveStagingThreshold } from "../staging/single-record";
@@ -32,7 +31,7 @@ import {
 	jsonByteSize,
 	TRANSPORT_LIMIT,
 } from "./passthrough-limits";
-import { buildStagedEnvelope, extractStagedColumns } from "./staging-envelope";
+import { buildStagedEnvelope, extractStagedColumns, resolveUpstreamTotal } from "./staging-envelope";
 
 // `extractStagedColumns` is re-exported so the long-standing
 // `import { extractStagedColumns } from "./api-proxy"` sites (and its colocated
@@ -157,22 +156,6 @@ async function preserveApiErrorData(
 	return boundedErrorData(data);
 }
 
-export interface ApiProxyToolOptions {
-	apiFetch: ApiFetchFn;
-	/** Optional legacy catalog metadata for drift hints */
-	catalog?: ApiCatalog;
-	/** Optional resolved OpenAPI metadata for drift hints */
-	openApiSpec?: ResolvedSpec;
-	/** DO namespace for auto-staging large responses */
-	doNamespace?: unknown;
-	/** Prefix for data access IDs (e.g., "gtex") */
-	stagingPrefix?: string;
-	/** Byte threshold for auto-staging (default 30KB, via DEFAULT_STAGING_THRESHOLD) */
-	stagingThreshold?: number;
-	/** WorkspaceDO namespace — when set and `ctx.workspace` is present, auto-staging routes there (ADR-006 Phase 0). */
-	workspaceNamespace?: unknown;
-}
-
 /**
  * Create the hidden __api_proxy tool entry.
  */
@@ -184,6 +167,7 @@ export function createApiProxyTool(options: ApiProxyToolOptions): ToolEntry {
 		doNamespace,
 		stagingPrefix,
 		stagingThreshold,
+		maxInlineBytes,
 		workspaceNamespace,
 	} = options;
 	const knownEndpoints = buildKnownEndpointIndex(catalog, openApiSpec);
@@ -265,19 +249,19 @@ export function createApiProxyTool(options: ApiProxyToolOptions): ToolEntry {
 
 				// T10.1 — a SINGLE record gets a raised staging threshold so it stays
 				// inline. undefined data (a 204 no-content) sizes to 0, not a throw (#7).
-				const responseBytes = result.data === undefined ? 0 : JSON.stringify(result.data).length;
+				const responseBytes = result.data === undefined ? 0 : jsonByteSize(result.data);
 				if (
 					doNamespace &&
 					stagingPrefix &&
 					shouldStage(
 						responseBytes,
-						effectiveStagingThreshold(result.data, stagingThreshold),
+						Math.min(effectiveStagingThreshold(result.data, stagingThreshold), maxInlineBytes ?? Infinity),
 					)
 				) {
 					// upstreamTotal powers the under-count completeness check; the
 					// envelope also carries staged columns (T3.3) and the silent
 					// over-match warning (T1.3), both built in buildStagedEnvelope.
-					const upstreamTotal = inferUpstreamTotal(result.data);
+					const upstreamTotal = resolveUpstreamTotal(result.data, result.upstreamTotal);
 					const staged = await stageToDoAndRespond(
 						result.data,
 						doNamespace as Parameters<typeof stageToDoAndRespond>[1],
@@ -286,22 +270,18 @@ export function createApiProxyTool(options: ApiProxyToolOptions): ToolEntry {
 						undefined,
 						stagingPrefix,
 						ctx?.sessionId,
-						buildStageOptions(
-							ctx,
-							workspaceNamespace,
-							stagingPrefix,
-							upstreamTotal,
-						),
+						buildStageOptions(ctx, workspaceNamespace, stagingPrefix, upstreamTotal),
 					);
 					return buildStagedEnvelope({
 						staged,
 						responseBytes,
 						originalData: result.data,
+						completeness: result.completeness,
 					});
 				}
 				// #3 — an UNSTAGED inline body over the transport limit is silently dropped; fail loud.
-				if (responseBytes > TRANSPORT_LIMIT) {
-					return { __api_error: true, incomplete: true, status: 413, code: "RESPONSE_TOO_LARGE", message: `Response too large (${responseBytes} > ${TRANSPORT_LIMIT}); narrow the query (fewer fields/rows) or use a paged endpoint.` };
+				if (responseBytes > Math.min(TRANSPORT_LIMIT, maxInlineBytes ?? Infinity)) {
+					return { __api_error: true, incomplete: true, status: 413, code: "RESPONSE_TOO_LARGE", message: `Response too large (${responseBytes} bytes); staging is required. Narrow the query (fewer fields/rows) or use a paged endpoint.` };
 				}
 
 				// A 200 is not proof the filter was applied — see detectUndeclaredParams.

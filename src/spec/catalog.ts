@@ -23,11 +23,12 @@
  */
 
 import type { ApiCatalog } from "@bio-mcp/shared/codemode/catalog";
+import { proteomicsdbEndpoints, proteomicsdbWorkflow } from "./proteomicsdb";
 
 export const proteomicsCatalog: ApiCatalog = {
-    name: "Proteomics Hub (PRIDE Archive + ProteomeXchange PROXI)",
+    name: "Proteomics Hub (PRIDE Archive + ProteomeXchange PROXI + ProteomicsDB)",
     baseUrl: "https://www.ebi.ac.uk",
-    version: "1.1",
+    version: "1.2",
     auth: "none",
     endpointCount: 17,
     notes:
@@ -41,7 +42,8 @@ export const proteomicsCatalog: ApiCatalog = {
         "- PROXI /spectra REQUIRES resultType. /datasets and /libraries default it.\n" +
         "- PROXI 'resultType=full' returns every repository hit — expect very large responses (stage them).\n" +
         "- Use /proxi/usi_examples when building a Universal Spectrum Identifier by hand.",
-    endpoints: [
+    workflows: [proteomicsdbWorkflow],
+    endpoints: [...proteomicsdbEndpoints,
         // ===================================================================
         // PRIDE Archive v3 — project / file discovery
         // ===================================================================
@@ -243,3 +245,5 @@ export const proteomicsCatalog: ApiCatalog = {
         },
     ],
 };
+
+proteomicsCatalog.endpointCount = proteomicsCatalog.endpoints.length;

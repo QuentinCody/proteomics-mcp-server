@@ -77,4 +77,11 @@ export type ApiFetchFn = (request: {
 	path: string;
 	params?: Record<string, unknown>;
 	body?: unknown;
-}) => Promise<{ status: number; data: unknown }>;
+}) => Promise<{
+  status: number;
+  data: unknown;
+  /** Adapter-verified pagination/coverage evidence, separate from native data. */
+  completeness?: import("../completeness").Completeness;
+  /** Override total inference; null explicitly means unknown (e.g. native count is page size). */
+  upstreamTotal?: number | null;
+}>;

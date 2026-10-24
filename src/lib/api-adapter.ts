@@ -6,6 +6,8 @@
 
 import type { ApiFetchFn } from "@bio-mcp/shared/codemode/catalog";
 import { prideFetch, proxiFetch } from "./http";
+import { proteomicsdbFetch } from "./proteomicsdb";
+import { proteomicsCompleteness } from "./completeness";
 
 const PRIDE_PREFIX = "/pride";
 const PROXI_PREFIX = "/proxi";
@@ -66,6 +68,10 @@ function assertNoDroppedPrideParams(
 
 export function createProteomicsApiFetch(): ApiFetchFn {
     return async (request) => {
+        if (request.path === "/proteomicsdb" || request.path.startsWith("/proteomicsdb/")) {
+            const result = await proteomicsdbFetch(request);
+            return { ...result, completeness: proteomicsCompleteness(result.data), upstreamTotal: null };
+        }
         let targetPath: string;
         let fetchFn: typeof prideFetch;
 
