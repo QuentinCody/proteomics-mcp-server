@@ -84,4 +84,3 @@ and [2026 database update](https://doi.org/10.1093/nar/gkaf1265).
 Drift risk is medium: recheck the three examples and OData `$metadata` schemas
 monthly and before relying on new fields. Access without registration does not
 establish unrestricted redistribution rights for every underlying study.
-
