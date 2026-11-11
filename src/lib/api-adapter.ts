@@ -1,11 +1,16 @@
 /**
  * Proteomics API adapter — routes to PRIDE Archive (`/pride/...`) or
- * ProteomeXchange PROXI (`/proxi/...`) based on the first virtual path
- * segment. Pattern lifted from `ontology-hub-mcp-server/src/lib/api-adapter.ts`.
+ * ProteomeCentral PROXI (`/proxi/...`), iProX dataset metadata (`/iprox/...`),
+ * or commit-pinned community SDRF (`/sdrf/...`)
+ * based on the first virtual path segment.
  */
 
-import type { ApiFetchFn } from "@bio-mcp/shared/codemode/catalog";
+import { type ApiFetchFn, commercialUseRefusal } from "@bio-mcp/shared/codemode/catalog";
 import { prideFetch, proxiFetch } from "./http";
+import { readProteomics } from "./read";
+import { annotationBody } from "./annotation";
+import { sdrfFetch } from "./sdrf";
+import { iproxFetch } from "./iprox";
 import { proteomicsdbFetch } from "./proteomicsdb";
 import { proteomicsCompleteness } from "./completeness";
 
@@ -66,11 +71,35 @@ function assertNoDroppedPrideParams(
     }
 }
 
+/**
+ * License audit 2026-11-10: PRIDE and PROXI are open. iProX has a conflicting
+ * personal-use clause, and the ProteomicsDB terms are not confirmed. So the
+ * commercial profile gets HTTP 451 for those two routes.
+ */
+function commercialRefusal(request: Parameters<ApiFetchFn>[0]) {
+    if (request.licenseProfile !== "commercial" || !/^\/(iprox|proteomicsdb)(\/|$)/.test(request.path)) return undefined;
+    return commercialUseRefusal("The iProX and ProteomicsDB routes", "their terms for commercial use are not confirmed; PRIDE and PROXI stay available");
+}
+
 export function createProteomicsApiFetch(): ApiFetchFn {
-    return async (request) => {
-        if (request.path === "/proteomicsdb" || request.path.startsWith("/proteomicsdb/")) {
-            const result = await proteomicsdbFetch(request);
-            return { ...result, completeness: proteomicsCompleteness(result.data), upstreamTotal: null };
+    const routed = createRoutedFetch();
+    return async (request) => commercialRefusal(request) ?? routed(request);
+}
+
+function createRoutedFetch(): ApiFetchFn {
+    const run: ApiFetchFn = async (request) => {
+        if (request.path === "/proteomicsdb" || request.path.startsWith("/proteomicsdb/")) return proteomicsdbFetch(request);
+        if (request.path === "/iprox" || request.path.startsWith("/iprox/")) return iproxFetch(request);
+        if (request.path.startsWith("/sdrf/")) return sdrfFetch(request);
+        if (request.path === "/proxi/annotate" && request.method === "POST") {
+            const body = annotationBody(request.body, request.params);
+            return readProteomics(await proxiFetch("/annotate", { resultType: "full", tolerance: 10, ...request.params }, {
+                method: "POST", body, headers: { "Content-Type": "application/json" },
+                timeout: 20000, deadlineMs: 25000, retries: 0,
+            }));
+        }
+        if (request.method !== "GET" || request.path === "/proxi/annotate") {
+            throw Object.assign(new Error("Use GET for archive reads; only /proxi/annotate accepts POST"), { status: 405 });
         }
         let targetPath: string;
         let fetchFn: typeof prideFetch;
@@ -84,37 +113,22 @@ export function createProteomicsApiFetch(): ApiFetchFn {
             fetchFn = proxiFetch;
         } else {
             const err = new Error(
-                `Unknown proteomics path '${request.path}'. Paths must start with '/pride/' (PRIDE Archive) or '/proxi/' (ProteomeXchange PROXI).`,
+                `Unknown proteomics path '${request.path}'. Use '/pride/' (PRIDE Archive), '/proxi/' (ProteomeCentral), '/iprox/datasets/{accession}' (iProX), '/sdrf/' (community annotations), or '/proteomicsdb/' (protein expression and peptide evidence).`,
             ) as Error & { status: number };
             err.status = 400;
             throw err;
         }
 
-        const response = await fetchFn(targetPath, request.params);
-
-        if (!response.ok) {
-            let errorBody: string;
-            try {
-                errorBody = await response.text();
-            } catch {
-                errorBody = response.statusText;
-            }
-            const error = new Error(`HTTP ${response.status}: ${errorBody.slice(0, 200)}`) as Error & {
-                status: number;
-                data: unknown;
-            };
-            error.status = response.status;
-            error.data = errorBody;
-            throw error;
+        return readProteomics(await fetchFn(targetPath, request.params, { timeout: 20000, deadlineMs: 25000 }));
+    };
+    return async request => {
+        const result = await run(request);
+        if (request.path.startsWith("/proxi/") && result.data && typeof result.data === "object" && "status" in result.data) {
+            const status = result.data.status;
+            if (status && typeof status === "object" && "status_code" in status && typeof status.status_code === "number" && status.status_code >= 400)
+                throw Object.assign(new Error("PROXI reported an application error; inspect the complete native status"), { status: 502, data: { http_status: result.status, native: result.data } });
         }
-
-        const contentType = response.headers.get("content-type") || "";
-        if (!contentType.includes("json")) {
-            const text = await response.text();
-            return { status: response.status, data: text };
-        }
-
-        const data = await response.json();
-        return { status: response.status, data };
+        const completeness = proteomicsCompleteness(result.data);
+        return completeness ? { ...result, completeness, upstreamTotal: completeness.total_available ?? null } : result;
     };
 }

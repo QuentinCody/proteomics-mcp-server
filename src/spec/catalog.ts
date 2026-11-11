@@ -1,5 +1,5 @@
 /**
- * Proteomics Hub API catalog — two APIs fronted through one Code Mode tool pair.
+ * Proteomics Hub catalog — archive APIs and community SDRF through one Code Mode pair.
  *
  * PRIDE Archive (EMBL-EBI):
  *   base: https://www.ebi.ac.uk/pride/ws/archive/v3
@@ -14,7 +14,7 @@
  *
  * ProteomeXchange PROXI (ProteomeCentral):
  *   base: https://proteomecentral.proteomexchange.org/api/proxi/v0.1
- *   Federated PSM / spectrum / peptidoform / protein search across repositories.
+ *   Dataset discovery and federated spectrum retrieval; resource support varies by host.
  *
  * Virtual paths are namespaced — the adapter strips the first segment and
  * routes the rest to the correct upstream:
@@ -23,34 +23,44 @@
  */
 
 import type { ApiCatalog } from "@bio-mcp/shared/codemode/catalog";
+import { proteomicsWorkflows } from "./workflows";
+import { sdrfEndpoints } from "./sdrf";
+import { iproxDatasetEndpoint, iproxDatasetWorkflow } from "./iprox";
 import { proteomicsdbEndpoints, proteomicsdbWorkflow } from "./proteomicsdb";
 
 export const proteomicsCatalog: ApiCatalog = {
     name: "Proteomics Hub (PRIDE Archive + ProteomeXchange PROXI + ProteomicsDB)",
     baseUrl: "https://www.ebi.ac.uk",
-    version: "1.2",
+    version: "1.3",
     auth: "none",
-    endpointCount: 17,
+    endpointCount: 19 + sdrfEndpoints.length + proteomicsdbEndpoints.length,
+    workflows: [...proteomicsWorkflows, iproxDatasetWorkflow, proteomicsdbWorkflow],
     notes:
-        "- Dual API. Always prefix paths: '/pride/...' for PRIDE Archive, '/proxi/...' for ProteomeXchange PROXI.\n" +
+        "- '/proteomicsdb/...' reads bounded protein expression, peptide identifications and tissue pages through the documented public OData API. Native response and source context are retained. These are not Kinobeads dose-response or drug-binding measurements.\n" +
+        "- Prefix paths: '/pride/...' for PRIDE Archive, '/proxi/...' for ProteomeCentral PROXI, '/iprox/datasets/{accession}' for direct iProX dataset metadata, '/sdrf/...' for commit-pinned community sample-to-file annotations.\n" +
         "- PRIDE keyword search MUST go to /pride/search/projects: api.get('/pride/search/projects', {keyword: 'cancer', pageSize: 20})\n" +
         "- /pride/projects is an UNFILTERED paginated dump (pageSize/page only). It does NOT accept keyword/filter — PRIDE ignores them and returns the default project list, so a keyword sent there answers a different question than the one asked. The adapter rejects that call rather than return the lie.\n" +
         "- PRIDE project detail: api.get('/pride/projects/PXD001357')\n" +
         "- PRIDE project files filter on 'filenameFilter' (NOT 'filter').\n" +
         "- PROXI datasets federate results across PRIDE, MassIVE, PeptideAtlas, jPOST, iProX.\n" +
-        "- PROXI /proteins, /psms and /peptidoforms are NOT IMPLEMENTED upstream (HTTP 501) — they are marked deprecated. For protein-level evidence use /pride/search/projects, or /proxi/spectra by USI.\n" +
+        "- ProteomeCentral /proteins, /psms and /peptidoforms returned HTTP 501 again on 2026-10-04; they remain deprecated. Other PROXI hosts have different capabilities. A project keyword match is not protein-level identification evidence.\n" +
         "- PROXI /spectra REQUIRES resultType. /datasets and /libraries default it.\n" +
         "- PROXI 'resultType=full' returns every repository hit — expect very large responses (stage them).\n" +
-        "- Use /proxi/usi_examples when building a Universal Spectrum Identifier by hand.",
-    workflows: [proteomicsdbWorkflow],
-    endpoints: [...proteomicsdbEndpoints,
+        "- Use provider-issued USIs; /proxi/usi_examples illustrates syntax but does not establish sample identity. Keep all repository results and status fields.\n" +
+        "- /pride/files/sdrf/{projectAccession} has a native string-array schema; preserve it. Community SDRF annotations may be unverified by submitters.\n" +
+        "- POST /proxi/annotate runs Quetzal annotation on supplied spectra, not a database search or confirmation of identity. Use resultType=full, tolerance in ppm. Preserve source spectra and annotation parameters separately.\n" +
+        "- Responses and annotation requests are bounded at 4 MiB; results stage above 30 KiB. Inspect staged schemas instead of accessing omitted arrays.",
+    endpoints: [
+        ...proteomicsdbEndpoints,
+        iproxDatasetEndpoint,
+        ...sdrfEndpoints,
         // ===================================================================
         // PRIDE Archive v3 — project / file discovery
         // ===================================================================
         {
             method: "GET",
             path: "/pride/search/projects",
-            summary: "Search PRIDE Archive projects by keyword, organism, tissue, disease, instrument, or date range — the ONLY PRIDE route that honors a keyword/filter",
+            summary: "Search PRIDE Archive projects by keyword, organism, tissue, disease, instrument, or date range",
             category: "pride_projects",
             featured: true,
             queryParams: [
@@ -59,11 +69,11 @@ export const proteomicsCatalog: ApiCatalog = {
                 { name: "pageSize", type: "number", required: false, description: "Results per page (default 100)" },
                 { name: "page", type: "number", required: false, description: "Zero-based page index" },
                 { name: "dateGap", type: "string", required: false, description: "Date range bucket (e.g. '+1MONTH', '+1YEAR')" },
-                { name: "sortFields", type: "string", required: false, description: "Comma-separated sort fields (default 'submission_date')" },
+                { name: "sortFields", type: "string", required: false, description: "Comma-separated sort fields (OpenAPI default 'submissionDate')" },
                 { name: "sortDirection", type: "string", required: false, description: "ASC or DESC", enum: ["ASC", "DESC"] },
             ],
             example: "await api.get('/pride/search/projects', { keyword: 'polycystic ovary', pageSize: 20 })",
-            usageHint: "Use this for every keyword/filter project lookup. An empty array here is a real zero-hit answer; /pride/projects cannot express a query at all.",
+            usageHint: "Use this for keyword/filter project lookup. An empty response describes this request only; verify paging and provider status before inferring absence. /pride/projects cannot express a query.",
         },
         {
             method: "GET",
@@ -111,7 +121,9 @@ export const proteomicsCatalog: ApiCatalog = {
         {
             method: "GET",
             path: "/pride/files/sdrf/{projectAccession}",
-            summary: "Get a project's SDRF (sample-to-data relationship) rows — the experimental design table",
+            summary: "Get a project's SDRF response as native strings (experimental design metadata)",
+            responseShape: "string[]",
+            usageHint: "Do not assume parsed sample objects. Preserve file provenance and community-annotation status; exact sample/file joins require inspecting the SDRF content.",
             category: "pride_files",
             pathParams: [
                 { name: "projectAccession", type: "string", required: true, description: "PXD accession" },
@@ -135,7 +147,7 @@ export const proteomicsCatalog: ApiCatalog = {
                 { name: "facetPage", type: "number", required: false, description: "Zero-based facet page index" },
                 { name: "dateGap", type: "string", required: false, description: "Date range bucket (e.g. '+1YEAR')" },
             ],
-            usageHint: "Empty facet objects ({}) mean the keyword matched no projects — a real zero-hit answer.",
+            usageHint: "Preserve native facet counts and status; empty facet objects do not independently establish project absence.",
         },
 
         // ===================================================================
@@ -149,7 +161,7 @@ export const proteomicsCatalog: ApiCatalog = {
             queryParams: [
                 { name: "resultType", type: "string", required: false, description: "Response detail level", enum: ["compact", "full"] },
                 { name: "pageSize", type: "number", required: false, description: "Results per page" },
-                { name: "pageNumber", type: "number", required: false, description: "Zero-based page number" },
+                { name: "pageNumber", type: "number", required: false, description: "One-based page number. Native 0 is clamped to page 1; use 2 for the next page and retain result_set.page_number." },
             ],
         },
         {
@@ -169,6 +181,7 @@ export const proteomicsCatalog: ApiCatalog = {
             queryParams: [
                 { name: "resultType", type: "string", required: false, description: "compact or full" },
                 { name: "pageSize", type: "number", required: false, description: "Results per page" },
+                { name: "pageNumber", type: "number", required: false, description: "One-based provider page number; inspect native result_set paging." },
             ],
         },
         {
@@ -191,8 +204,26 @@ export const proteomicsCatalog: ApiCatalog = {
         },
 
         // ===================================================================
+        // PROXI — spectrum annotation documented by the Quetzal provider.
+        // https://github.com/Quetzal-Annotator/quetzal-annotator#public-api
+        // ===================================================================
+        {
+            method: "POST",
+            path: "/proxi/annotate",
+            summary: "Annotate supplied MS/MS spectra with Quetzal fragment-ion interpretations",
+            category: "proxi_annotation",
+            featured: true,
+            queryParams: [
+                { name: "resultType", type: "string", required: false, enum: ["full"], default: "full", description: "Full annotation response" },
+                { name: "tolerance", type: "number", required: false, default: 10, description: "Positive peak matching tolerance in ppm" },
+            ],
+            body: { contentType: "application/json", description: "Array of 1–100 spectra, max 4 MiB (local limits). Each requires equally sized, nonempty numeric mzs/intensities arrays, with mzs ordered increasingly. Native attributes, usi, interpretations and extended_data are retained." },
+            usageHint: "api.post('/proxi/annotate', spectra, {resultType:'full', tolerance:10}). This transmits supplied spectra for computation. Keep original peaks, identifiers and chosen parameters separately. Inspect native status and preserve output peaks with their interpretations by position; the provider can remove zero-intensity input peaks. Algorithmic annotations are not validated identifications.",
+        },
+
+        // ===================================================================
         // PROXI — officially specified but NOT IMPLEMENTED at ProteomeCentral.
-        // Verified live 2026-07-16: each returns HTTP 501 "Although this is an
+        // Revalidated live 2026-10-04: each returns HTTP 501 "Although this is an
         // officially defined PROXI endpoint, it has not yet been implemented at
         // this server" (the 400 you get first is only the resultType check
         // firing ahead of the 501). Marked deprecated so Code Mode cannot
@@ -245,5 +276,3 @@ export const proteomicsCatalog: ApiCatalog = {
         },
     ],
 };
-
-proteomicsCatalog.endpointCount = proteomicsCatalog.endpoints.length;

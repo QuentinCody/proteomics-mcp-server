@@ -6,7 +6,7 @@ const record = (value: unknown): value is Record<string, unknown> => value !== n
 type Result = { content: Array<{ type: "text"; text: string }>; structuredContent?: Record<string, unknown>; isError?: boolean; [key: string]: unknown };
 export type DataEnv = { PROTEOMICS_DATA_DO?: unknown };
 const bytes = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
-const source = { id: "proteomics", name: "PRIDE Archive, ProteomeCentral and ProteomicsDB", url: "https://www.proteomexchange.org" };
+const source = { id: "proteomics", name: "PRIDE Archive, ProteomeCentral, iProX, ProteomicsDB and community SDRF annotations", url: "https://www.proteomexchange.org" };
 
 async function cite(structured: Record<string, unknown>, toolName: string, query: unknown) {
   const meta = record(structured._meta) ? structured._meta : {};

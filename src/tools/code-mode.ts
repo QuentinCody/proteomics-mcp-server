@@ -33,7 +33,7 @@ export function registerCodeMode(
     const executeTool = createExecuteTool({
         prefix: "proteomics",
         // Verifiable provenance: proteomics_execute results carry a _meta.citation.
-        source: { id: "proteomics", name: "PRIDE Archive, ProteomeCentral and ProteomicsDB", url: "https://www.proteomexchange.org" },
+        source: { id: "proteomics", name: "PRIDE Archive, ProteomeCentral, iProX, ProteomicsDB and community SDRF annotations", url: "https://www.proteomexchange.org" },
         catalog: proteomicsCatalog,
         apiFetch,
         preserveApiErrors: true,
